@@ -20,6 +20,8 @@ object AppConfig {
     const val DEFAULT_SUBSCRIPTION_ID = "__default_subscription__"
 
     /** Preferences mapped to MMKV storage. */
+    const val PREF_HWID = "pref_hwid"
+    const val PREF_HWID_ENABLED = "pref_hwid_enabled"
     const val PREF_SNIFFING_ENABLED = "pref_sniffing_enabled"
     const val PREF_ROUTE_ONLY_ENABLED = "pref_route_only_enabled"
     const val PREF_PER_APP_PROXY = "pref_per_app_proxy"
