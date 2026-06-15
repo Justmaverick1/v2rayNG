@@ -15,10 +15,13 @@ import android.util.Patterns
 import android.webkit.URLUtil
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
+import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.AppConfig.LOOPBACK
 import com.v2ray.ang.BuildConfig
+import com.v2ray.ang.handler.MmkvManager
 import java.io.IOException
+import java.security.MessageDigest
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.URI
@@ -422,6 +425,57 @@ object Utils {
             LogUtil.e(AppConfig.TAG, "Failed to generate device ID", e)
             ""
         }
+    }
+
+    /**
+     * Returns a stable hardware identifier (HWID) for device-limit panels
+     * (Remnawave / Happ standard). Generated once and persisted in MMKV.
+     *
+     * It is seeded from ANDROID_ID (so it survives a reinstall on the same
+     * device) and hashed with SHA-256, so the raw ANDROID_ID is never sent.
+     * Falls back to a random UUID if ANDROID_ID is unavailable.
+     *
+     * @return A stable UUID-formatted HWID string.
+     */
+    fun getHwid(): String {
+        MmkvManager.decodeSettingsString(AppConfig.PREF_HWID)?.let {
+            if (it.isNotBlank()) return it
+        }
+        val hwid = try {
+            val seed = Settings.Secure.getString(
+                AngApplication.application.contentResolver,
+                Settings.Secure.ANDROID_ID
+            )
+            if (!seed.isNullOrBlank()) {
+                val digest = MessageDigest.getInstance("SHA-256")
+                    .digest(seed.toByteArray(Charsets.UTF_8))
+                UUID.nameUUIDFromBytes(digest).toString()
+            } else {
+                UUID.randomUUID().toString()
+            }
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "Failed to derive HWID, using random", e)
+            UUID.randomUUID().toString()
+        }
+        MmkvManager.encodeSettings(AppConfig.PREF_HWID, hwid)
+        return hwid
+    }
+
+    /**
+     * Builds the HWID/device headers expected by subscription panels that
+     * implement device limits (Remnawave / Happ standard). Only x-hwid is
+     * required; the rest help the panel display the device more clearly.
+     *
+     * @return A map of header name to value.
+     */
+    fun getSubscriptionHeaders(): Map<String, String> {
+        return mapOf(
+            "x-hwid" to getHwid(),
+            "x-device-os" to "Android",
+            "x-ver-os" to (Build.VERSION.RELEASE ?: ""),
+            "x-device-model" to "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
+            "x-app-version" to BuildConfig.VERSION_NAME,
+        )
     }
 
     /**
