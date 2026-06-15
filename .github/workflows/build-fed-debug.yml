@@ -1,0 +1,107 @@
+name: Build Fedarisha APK (debug)
+
+# Запуск вручную: вкладка Actions -> "Build Fedarisha APK (debug)" -> Run workflow
+on:
+  workflow_dispatch:
+
+env:
+  # Исходник форка ядра и его тег. Меняй здесь, если выйдет новая версия.
+  XRAY_FORK_REPO: https://github.com/Fedarisha/Xray-core-fedarisha
+  XRAY_FORK_TAG: v26.5.9-fed.2
+  NDK_VERSION: 29.0.14206865
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+      with:
+        submodules: 'recursive'
+        fetch-depth: '0'
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v4.0.1
+      with:
+        log-accepted-android-sdk-licenses: false
+        cmdline-tools-version: '13114758'
+        packages: 'platforms;android-36.1 build-tools;36.1.0 platform-tools'
+
+    - name: Install NDK
+      run: |
+        echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+          --channel=0 \
+          --install "ndk;${NDK_VERSION}"
+        echo "NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> $GITHUB_ENV
+        echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> $GITHUB_ENV
+        # Зафиксировать версию NDK в gradle (привязка к строке compileSdk = 36)
+        sed -i 's/compileSdk = 36/compileSdk = 36\n    ndkVersion = "'"${NDK_VERSION}"'"/' \
+          "${GITHUB_WORKSPACE}/V2rayNG/app/build.gradle.kts"
+
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.26'
+
+    - name: Setup Java
+      uses: actions/setup-java@v5
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+
+    - name: Clone Fedarisha Xray-core fork
+      run: |
+        git clone --depth 1 --branch "${XRAY_FORK_TAG}" \
+          "${XRAY_FORK_REPO}" "${GITHUB_WORKSPACE}/xray-core-fed"
+
+    - name: Build libv2ray.aar with Fedarisha core
+      run: |
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        pushd AndroidLibXrayLite
+
+        # Подменить официальное ядро на форк Fedarisha
+        sed -i "/^replace github\.com\/xtls\/xray-core =>/d" go.mod
+        printf "\nreplace github.com/xtls/xray-core => %s\n" \
+          "${GITHUB_WORKSPACE}/xray-core-fed" >> go.mod
+        go mod tidy
+
+        # Гео-данные, вшиваемые в aar (как в оригинальном build-release.sh)
+        mkdir -p assets data
+        curl -sL https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat   -o data/geoip.dat
+        curl -sL https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat -o data/geosite.dat
+        curl -sL https://raw.githubusercontent.com/Loyalsoldier/geoip/release/geoip-only-cn-private.dat -o data/geoip-only-cn-private.dat
+        cp data/*.dat assets/
+
+        # gomobile
+        go install golang.org/x/mobile/cmd/gomobile@latest
+        go install golang.org/x/mobile/cmd/gobind@latest
+        gomobile init || true
+
+        GOFLAGS="-buildvcs=false" gomobile bind -v \
+          -androidapi 24 -trimpath -ldflags='-s -w -buildid=' ./
+        popd
+
+        mkdir -p V2rayNG/app/libs
+        cp AndroidLibXrayLite/libv2ray.aar V2rayNG/app/libs/
+        ls -lh V2rayNG/app/libs/libv2ray.aar
+
+    - name: Build libhevtun (.so)
+      run: |
+        bash compile-hevtun.sh
+        cp -r libs V2rayNG/app
+
+    - name: Build debug APK
+      run: |
+        cd "${GITHUB_WORKSPACE}/V2rayNG"
+        echo "sdk.dir=${ANDROID_HOME}" > local.properties
+        chmod 755 gradlew
+        ./gradlew assembleDebug
+
+    - name: Upload APKs
+      uses: actions/upload-artifact@v7
+      if: ${{ success() }}
+      with:
+        name: v2rayNG-fedarisha-debug
+        path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/**/debug/*.apk
+        if-no-files-found: error
