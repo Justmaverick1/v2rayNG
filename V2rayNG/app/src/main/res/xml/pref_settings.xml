@@ -145,6 +145,12 @@
             android:title="@string/title_pref_route_only_enabled" />
 
         <CheckBoxPreference
+            android:defaultValue="true"
+            android:key="pref_hwid_enabled"
+            android:summary="@string/summary_pref_hwid_enabled"
+            android:title="@string/title_pref_hwid_enabled" />
+
+        <CheckBoxPreference
             android:defaultValue="false"
             android:key="pref_allow_insecure"
             android:title="@string/title_pref_allow_insecure" />
