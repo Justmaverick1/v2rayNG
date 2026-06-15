@@ -153,7 +153,8 @@ object HttpUtil {
         timeout: Int = 15000,
         httpPort: Int = 0,
         proxyUsername: String? = null,
-        proxyPassword: String? = null
+        proxyPassword: String? = null,
+        extraHeaders: Map<String, String>? = null
     ): String {
         var currentUrl = url
         var redirects = 0
@@ -172,6 +173,10 @@ object HttpUtil {
                 .get()
                 .header("User-agent", finalUserAgent)
                 .header("Connection", "close")
+
+            extraHeaders?.forEach { (name, value) ->
+                if (value.isNotBlank()) requestBuilder.header(name, value)
+            }
 
             applyEmbeddedBasicAuthHeader(currentUrl, requestBuilder)
 
